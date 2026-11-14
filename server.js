@@ -26,6 +26,11 @@ const PORT = Number(process.env.PORT) || 5000;
 const NODE_ENV = process.env.NODE_ENV || "development";
 const isProduction = NODE_ENV === "production";
 
+// Trust Render's reverse proxy
+if (isProduction) {
+  app.set("trust proxy", 1);
+}
+
 // Validate environment configuration
 const validateEnvironment = () => {
   const requiredVariables = [
