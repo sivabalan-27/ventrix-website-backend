@@ -1,79 +1,81 @@
 
 import multer from "multer";
-import fs from "fs";
 import path from "path";
 
-const uploadPath = path.join("uploads", "resumes");
-
-fs.mkdirSync(uploadPath, { recursive: true });
-
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, uploadPath);
-  },
-
-  filename: (req, file, cb) => {
-    const uniqueName =
-      `${Date.now()}-${file.originalname.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
-
-    cb(null, uniqueName);
-  },
-});
-
-// Allowed file extensions and MIME types
-const allowedFiles = {
-  ".pdf": "application/pdf",
-  ".doc": "application/msword",
-  ".docx":
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-};
-
+// Allow PDF files only
 const fileFilter = (req, file, cb) => {
   const extension = path.extname(file.originalname).toLowerCase();
-  const expectedMimeType = allowedFiles[extension];
 
-  if (!expectedMimeType || file.mimetype !== expectedMimeType) {
-    return cb(
-      new Error("Only valid PDF, DOC, and DOCX files are allowed.")
-    );
+  if (
+    extension !== ".pdf" ||
+    file.mimetype !== "application/pdf"
+  ) {
+    return cb(new Error("Invalid resume file type."));
   }
 
   cb(null, true);
 };
 
+// Configure Multer memory storage
 const upload = multer({
-  storage,
+  storage: multer.memoryStorage(),
   fileFilter,
   limits: {
-    fileSize: 5 * 1024 * 1024, // 5 MB
+    fileSize: 5 * 1024 * 1024,
     files: 1,
+    fields: 20,
+    parts: 21,
   },
 });
 
-// Handle Multer errors
+// Validate actual PDF file signature
+const validateFileSignature = (file) => {
+  const buffer = file.buffer;
+
+  if (!buffer || buffer.length < 8) {
+    return false;
+  }
+
+  return buffer.subarray(0, 5).toString() === "%PDF-";
+};
+
+// Handle resume upload and validation
 export const handleResumeUpload = (req, res, next) => {
   upload.single("resume")(req, res, (error) => {
     if (error instanceof multer.MulterError) {
-      if (error.code === "LIMIT_FILE_SIZE") {
-        return res.status(413).json({
-          success: false,
-          message: "Resume file size must not exceed 5 MB.",
-        });
-      }
+      const isFileTooLarge = error.code === "LIMIT_FILE_SIZE";
 
-      return res.status(400).json({
+      return res.status(isFileTooLarge ? 413 : 400).json({
         success: false,
-        message: "Resume upload failed. Please check the selected file.",
+        message: isFileTooLarge
+          ? "Resume file size must not exceed 5 MB."
+          : "Resume upload failed. Please check the selected file.",
       });
     }
 
     if (error) {
+      console.error("Resume upload error:", error.message);
+
       return res.status(400).json({
         success: false,
-        message: error.message,
+        message: "Invalid resume upload. Please select a valid PDF file.",
       });
     }
 
-    next();
+    // Application controller checks whether resume is required
+    if (!req.file) {
+      return next();
+    }
+
+    const isValid = validateFileSignature(req.file);
+
+    if (!isValid) {
+      return res.status(400).json({
+        success: false,
+        message: "The uploaded file is not a valid PDF.",
+      });
+    }
+
+    return next();
   });
 };
